@@ -22,16 +22,14 @@ import android.support.annotation.RequiresApi;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
-import android.util.Log;
 import android.view.View;
 import android.widget.Button;
-import android.widget.ImageView;
+import android.widget.Toast;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.projectoxford.face.FaceServiceClient;
 import com.microsoft.projectoxford.face.FaceServiceRestClient;
 import com.microsoft.projectoxford.face.contract.Face;
-import com.microsoft.projectoxford.face.contract.FaceRectangle;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -40,7 +38,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -57,22 +54,18 @@ public class PhotoTakerActivity extends AppCompatActivity {
 
     private String travelId;
 
-    private final String apiEndpoint = "https://westeurope.api.cognitive.microsoft.com/face/v1.0";
+    private final  String startTravelUrl = "/start-new-travel";
 
-    private final String subscriptionKey = "139aa74fda7c4448b2328ddc723e4934";
+    private final String completeTravel = "/complete-travel?travelId=";
+
+    private final String saveEmotionLogUrl = "/save-emotion-log";
 
     private final FaceServiceClient faceServiceClient =
-            new FaceServiceRestClient(apiEndpoint, subscriptionKey);
+            new FaceServiceRestClient(BuildConfig.AzureApi, BuildConfig.AzureSubscriptionKey);
 
     private Uri file;
 
-    static final int REQUEST_IMAGE_CAPTURE = 1;
-    private Bitmap mImageBitmap;
-    private String mCurrentPhotoPath;
-    private ImageView mImageView;
-
     private Button takePictureButton;
-    private ImageView imageView;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -80,16 +73,13 @@ public class PhotoTakerActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_photo_taker);
 
-        Context mBase = getApplicationContext();
-        // retrieve what is sent from main activity
         Intent intent = getIntent();
         String driverId = intent.getStringExtra("driverId");
         String vehicleId = intent.getStringExtra("vehicleId");
-        System.out.println("ERKAN: " + vehicleId);
-        postRequest("/start-new-travel", new TravelStater(driverId,vehicleId));
+
+        postRequest(startTravelUrl, new TravelStater(driverId,vehicleId));
 
         takePictureButton = (Button) findViewById(R.id.button_image);
-        imageView = (ImageView) findViewById(R.id.imageview);
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             takePictureButton.setEnabled(false);
@@ -161,12 +151,10 @@ public class PhotoTakerActivity extends AppCompatActivity {
             final RequestBody copy = request.body();
             final Buffer buffer = new Buffer();
             copy.writeTo(buffer);
-            System.out.println("ERKAN " + buffer.readUtf8() + " -- " + postBody.toString());
-            System.out.println("ERKAN " + request.headers() + "\n" + request.body());
-            Response response = client.newCall(request).execute();
-            System.out.println("ERKAN " + response.code() + "\n" + response.body());
 
-            if (path.equals("/start-new-travel")) {
+            Response response = client.newCall(request).execute();
+
+            if (path.equals(startTravelUrl)) {
                 String sBody = response.body().string();
                 ObjectMapper mapper = new ObjectMapper();
                 Map<String,Object> map = mapper.readValue(sBody, Map.class);
@@ -183,18 +171,17 @@ public class PhotoTakerActivity extends AppCompatActivity {
         OkHttpClient client = new OkHttpClient();
 
         Request request = new Request.Builder()
-                .url(API_URL + "/complete-travel?travelId=" + travelId)
+                .url(API_URL + completeTravel + travelId)
                 .build();
 
         try {
             Response response = client.newCall(request).execute();
+            Toast.makeText(PhotoTakerActivity.this,"Travel ended!", Toast.LENGTH_SHORT).show();
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
-    // Detect faces by uploading a face image.
-// Frame faces after detection.
     private void detectAndFrame(final Bitmap imageBitmap) {
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         imageBitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream);
@@ -211,9 +198,8 @@ public class PhotoTakerActivity extends AppCompatActivity {
                             publishProgress("Detecting...");
                             Face[] result = faceServiceClient.detect(
                                     params[0],
-                                    true,         // returnFaceId
-                                    false,        // returnFaceLandmarks
-                                    // returnFaceAttributes:
+                                    true,
+                                    false,
                                     new FaceServiceClient.FaceAttributeType[]{
                                             FaceServiceClient.FaceAttributeType.Emotion
                                     });
@@ -236,19 +222,16 @@ public class PhotoTakerActivity extends AppCompatActivity {
 
                     @Override
                     protected void onPreExecute() {
-                        //TODO: show progress dialog
                         detectionProgressDialog.show();
                     }
 
                     @Override
                     protected void onProgressUpdate(String... progress) {
-                        //TODO: update progress
                         detectionProgressDialog.setMessage(progress[0]);
                     }
 
                     @Override
                     protected void onPostExecute(Face[] result) {
-                        //TODO: update face frames
                         detectionProgressDialog.dismiss();
 
                         if (!exceptionMessage.equals("")) {
@@ -270,11 +253,8 @@ public class PhotoTakerActivity extends AppCompatActivity {
                         }
 
                         SaveEmotionLogRequest saveEmotionLogRequest = new SaveEmotionLogRequest(travelId, emotionScoreRequestList);
-                        postRequest("/save-emotion-log", saveEmotionLogRequest);
+                        postRequest(saveEmotionLogUrl, saveEmotionLogRequest);
 
-
-                        ImageView imageView = findViewById(R.id.imageview);
-//                        imageView.setImageBitmap(drawFaceRectanglesOnBitmap(imageBitmap, result));
                         imageBitmap.recycle();
                     }
                 };
@@ -282,28 +262,6 @@ public class PhotoTakerActivity extends AppCompatActivity {
         detectTask.execute(inputStream);
     }
 
-    private static Bitmap drawFaceRectanglesOnBitmap(
-            Bitmap originalBitmap, Face[] faces) {
-        Bitmap bitmap = originalBitmap.copy(Bitmap.Config.ARGB_8888, true);
-        Canvas canvas = new Canvas(bitmap);
-        Paint paint = new Paint();
-        paint.setAntiAlias(true);
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setColor(Color.RED);
-        paint.setStrokeWidth(10);
-        if (faces != null) {
-            for (Face face : faces) {
-                FaceRectangle faceRectangle = face.faceRectangle;
-                canvas.drawRect(
-                        faceRectangle.left,
-                        faceRectangle.top,
-                        faceRectangle.left + faceRectangle.width,
-                        faceRectangle.top + faceRectangle.height,
-                        paint);
-            }
-        }
-        return bitmap;
-    }
 
     private void showError(String message) {
         new AlertDialog.Builder(this)

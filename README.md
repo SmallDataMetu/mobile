@@ -18,6 +18,7 @@ The project is developed at Mercedes - Benz Hack.Istanbul 2018 event!
 
 - Clone the repository
 - Open the project at Android Studio
+- **Update `AzureApi` and `AzureSubscriptionKey` credentials** with yours at `Rater/gradle.properties`
 - Build the project
 - Use it to analyze!
 

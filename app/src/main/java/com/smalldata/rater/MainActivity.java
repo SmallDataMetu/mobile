@@ -20,7 +20,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void startTravel(View view) {
-        Toast.makeText(MainActivity.this,"Your Message", Toast.LENGTH_LONG).show();
+        Toast.makeText(MainActivity.this,"Travel started", Toast.LENGTH_SHORT).show();
         Intent myIntent = new Intent(this, PhotoTakerActivity.class);
         myIntent.putExtra("driverId", "V-00000001"); //Optional parameters
         myIntent.putExtra("vehicleId", "54e59440-7bd6-415a-970b-82ace29a1814");
