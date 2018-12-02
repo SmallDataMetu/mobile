@@ -15,40 +15,47 @@ import android.icu.text.SimpleDateFormat;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.support.annotation.RequiresApi;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
-import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.ImageView;
 
-import com.android.volley.Request;
-import com.android.volley.RequestQueue;
-import com.android.volley.Response;
-import com.android.volley.VolleyError;
-import com.android.volley.toolbox.StringRequest;
-import com.android.volley.toolbox.Volley;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.microsoft.projectoxford.face.FaceServiceClient;
+import com.microsoft.projectoxford.face.FaceServiceRestClient;
+import com.microsoft.projectoxford.face.contract.Face;
+import com.microsoft.projectoxford.face.contract.FaceRectangle;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
-
-import com.microsoft.projectoxford.face.*;
-import com.microsoft.projectoxford.face.contract.*;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+import okio.Buffer;
 
 public class PhotoTakerActivity extends AppCompatActivity {
-    RequestQueue requestQueue;
-    String apiURL ="http://www.google.com";
+    private final String API_URL = "https://smalldata-hack.herokuapp.com";
     private ProgressDialog detectionProgressDialog;
+
+    private String travelId;
 
     private final String apiEndpoint = "https://westeurope.api.cognitive.microsoft.com/face/v1.0";
 
@@ -70,23 +77,23 @@ public class PhotoTakerActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         detectionProgressDialog = new ProgressDialog(this);
-
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_photo_taker);
 
         Context mBase = getApplicationContext();
-        requestQueue = Volley.newRequestQueue(mBase);
         // retrieve what is sent from main activity
         Intent intent = getIntent();
-        String value = intent.getStringExtra("key_example");
-        Log.i(this.getLocalClassName(), value);
+        String driverId = intent.getStringExtra("driverId");
+        String vehicleId = intent.getStringExtra("vehicleId");
+        System.out.println("ERKAN: " + vehicleId);
+        postRequest("/start-new-travel", new TravelStater(driverId,vehicleId));
 
         takePictureButton = (Button) findViewById(R.id.button_image);
         imageView = (ImageView) findViewById(R.id.imageview);
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             takePictureButton.setEnabled(false);
-            ActivityCompat.requestPermissions(this, new String[] { Manifest.permission.CAMERA, Manifest.permission.WRITE_EXTERNAL_STORAGE }, 0);
+            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.CAMERA, Manifest.permission.WRITE_EXTERNAL_STORAGE}, 0);
         }
     }
 
@@ -110,28 +117,26 @@ public class PhotoTakerActivity extends AppCompatActivity {
     }
 
     @RequiresApi(api = Build.VERSION_CODES.N)
-    private static File getOutputMediaFile(){
+    private static File getOutputMediaFile() {
         File mediaStorageDir = new File(Environment.getExternalStoragePublicDirectory(
                 Environment.DIRECTORY_PICTURES), "CameraDemo");
 
-        if (!mediaStorageDir.exists()){
-            if (!mediaStorageDir.mkdirs()){
+        if (!mediaStorageDir.exists()) {
+            if (!mediaStorageDir.mkdirs()) {
                 return null;
             }
         }
 
         String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
         return new File(mediaStorageDir.getPath() + File.separator +
-                "IMG_"+ timeStamp + ".jpg");
+                "IMG_" + timeStamp + ".jpg");
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         if (requestCode == 100) {
             if (resultCode == RESULT_OK) {
-                StringRequest request = prepRequest();
-                requestQueue.add(request);
-                //imageView.setImageURI(file);
+
                 try {
                     detectAndFrame(MediaStore.Images.Media.getBitmap(this.getContentResolver(), file));
                 } catch (IOException e) {
@@ -141,24 +146,52 @@ public class PhotoTakerActivity extends AppCompatActivity {
         }
     }
 
-    public StringRequest prepRequest() {
-        StringRequest stringRequest = new StringRequest(Request.Method.GET, apiURL,
-                new Response.Listener<String>() {
-                    @Override
-                    public void onResponse(String response) {
-                        // Display the first 500 characters of the response string.
-                        Log.i("onResponse","Response is: "+ response.substring(0,500));
-                    }
-                }, new Response.ErrorListener() {
-                    @Override
-                    public void onErrorResponse(VolleyError error) {
-                        Log.i("onErrorResponse","That didn't work!");
-                    }
-        });
-        return stringRequest;
+    public void postRequest(String path, Object postBody) {
+        final MediaType JSON
+                = MediaType.parse("application/json; charset=utf-8");
+
+        OkHttpClient client = new OkHttpClient();
+        RequestBody body = RequestBody.create(JSON, postBody.toString());
+        Request request = new Request.Builder()
+                .url(API_URL + path)
+                .post(body)
+                .build();
+
+        try {
+            final RequestBody copy = request.body();
+            final Buffer buffer = new Buffer();
+            copy.writeTo(buffer);
+            System.out.println("ERKAN " + buffer.readUtf8() + " -- " + postBody.toString());
+            System.out.println("ERKAN " + request.headers() + "\n" + request.body());
+            Response response = client.newCall(request).execute();
+            System.out.println("ERKAN " + response.code() + "\n" + response.body());
+
+            if (path.equals("/start-new-travel")) {
+                String sBody = response.body().string();
+                ObjectMapper mapper = new ObjectMapper();
+                Map<String,Object> map = mapper.readValue(sBody, Map.class);
+                travelId = map.get("travelId").toString();
+
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
-    public void endTravel(View view) { }
+
+    public void endTravel(View view) {
+        OkHttpClient client = new OkHttpClient();
+
+        Request request = new Request.Builder()
+                .url(API_URL + "/complete-travel?travelId=" + travelId)
+                .build();
+
+        try {
+            Response response = client.newCall(request).execute();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
 
     // Detect faces by uploading a face image.
 // Frame faces after detection.
@@ -181,11 +214,11 @@ public class PhotoTakerActivity extends AppCompatActivity {
                                     true,         // returnFaceId
                                     false,        // returnFaceLandmarks
                                     // returnFaceAttributes:
-                                 new FaceServiceClient.FaceAttributeType[] {
-                                    FaceServiceClient.FaceAttributeType.Emotion
-                                 });
+                                    new FaceServiceClient.FaceAttributeType[]{
+                                            FaceServiceClient.FaceAttributeType.Emotion
+                                    });
 
-                            if (result == null){
+                            if (result == null) {
                                 publishProgress(
                                         "Detection Finished. Nothing detected");
                                 return null;
@@ -206,39 +239,49 @@ public class PhotoTakerActivity extends AppCompatActivity {
                         //TODO: show progress dialog
                         detectionProgressDialog.show();
                     }
+
                     @Override
                     protected void onProgressUpdate(String... progress) {
                         //TODO: update progress
                         detectionProgressDialog.setMessage(progress[0]);
                     }
+
                     @Override
                     protected void onPostExecute(Face[] result) {
                         //TODO: update face frames
                         detectionProgressDialog.dismiss();
 
-                        if(!exceptionMessage.equals("")){
+                        if (!exceptionMessage.equals("")) {
                             showError(exceptionMessage);
                         }
                         if (result == null) return;
 
-                        Log.i("emotion anger: ", new Double(result[0].faceAttributes.emotion.anger).toString());
-                        Log.i("emotion contempt: ", new Double(result[0].faceAttributes.emotion.contempt).toString());
-                        Log.i("emotion disguswt: ", new Double(result[0].faceAttributes.emotion.disgust).toString());
-                        Log.i("emotion fear: ", new Double(result[0].faceAttributes.emotion.fear).toString());
-                        Log.i("emotion happiness: ", new Double(result[0].faceAttributes.emotion.happiness).toString());
-                        Log.i("emotion neutral: ", new Double(result[0].faceAttributes.emotion.neutral).toString());
-                        Log.i("emotion sadness: ", new Double(result[0].faceAttributes.emotion.sadness).toString());
-                        Log.i("emotion surprise: ", new Double(result[0].faceAttributes.emotion.surprise).toString());
+                        List<EmotionScoreRequest> emotionScoreRequestList = new ArrayList<>();
+                        for (Face face : result
+                                ) {
+                            emotionScoreRequestList.add(new EmotionScoreRequest(face.faceAttributes.emotion.anger,
+                                    face.faceAttributes.emotion.contempt,
+                                    face.faceAttributes.emotion.disgust,
+                                    face.faceAttributes.emotion.fear,
+                                    face.faceAttributes.emotion.happiness,
+                                    face.faceAttributes.emotion.neutral,
+                                    face.faceAttributes.emotion.sadness,
+                                    face.faceAttributes.emotion.surprise));
+                        }
+
+                        SaveEmotionLogRequest saveEmotionLogRequest = new SaveEmotionLogRequest(travelId, emotionScoreRequestList);
+                        postRequest("/save-emotion-log", saveEmotionLogRequest);
+
 
                         ImageView imageView = findViewById(R.id.imageview);
-                        imageView.setImageBitmap(
-                                drawFaceRectanglesOnBitmap(imageBitmap, result));
+//                        imageView.setImageBitmap(drawFaceRectanglesOnBitmap(imageBitmap, result));
                         imageBitmap.recycle();
                     }
                 };
 
         detectTask.execute(inputStream);
     }
+
     private static Bitmap drawFaceRectanglesOnBitmap(
             Bitmap originalBitmap, Face[] faces) {
         Bitmap bitmap = originalBitmap.copy(Bitmap.Config.ARGB_8888, true);
@@ -261,13 +304,15 @@ public class PhotoTakerActivity extends AppCompatActivity {
         }
         return bitmap;
     }
+
     private void showError(String message) {
         new AlertDialog.Builder(this)
                 .setTitle("Error")
                 .setMessage(message)
                 .setPositiveButton("OK", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int id) {
-                    }})
+                    }
+                })
                 .create().show();
     }
 
